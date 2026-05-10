@@ -32,3 +32,24 @@ Environment:
 - `AGENTDISPATCH_ARTIFACT_DIR`: where `result.json` and `manifest.json` are written.
 - `AGENTDISPATCH_COMMAND_ALLOWLIST`: comma-separated command prefixes allowed for `command.run`.
 - `AGENTDISPATCH_AGENT_FRAMEWORK`: default `agent.run` framework name when the payload does not specify one.
+
+## Build And Push To ECR
+
+AgentCore Runtime runs on AWS Graviton, so build the reference worker image for `linux/arm64`.
+
+```bash
+AWS_REGION=us-west-2 \
+ECR_REPOSITORY=agentdispatch-worker-agentcore \
+IMAGE_TAG=latest \
+./scripts/build-and-push-ecr.sh
+```
+
+The script:
+
+- creates the ECR repository if it does not exist
+- runs `npm ci` and `npm run build`
+- builds the Docker image for `linux/arm64`
+- pushes the image to ECR
+- prints the final image URI
+
+Use the printed image URI as `target.details.ecrImageUri` for AgentDispatch runtime-mode dispatch.

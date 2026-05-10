@@ -13,6 +13,7 @@
   "files": ["dist", "README.md", "LICENSE", "Dockerfile"],
   "scripts": {
     "build": "tsup src/index.ts src/server.ts --format esm --dts --clean",
+    "image:push:ecr": "bash scripts/build-and-push-ecr.sh",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
