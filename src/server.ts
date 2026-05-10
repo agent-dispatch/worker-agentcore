@@ -23,7 +23,10 @@ const server = createServer(async (request, response) => {
 
   try {
     const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as WorkerPayload;
-    const result = await runAgentDispatchWorkerTask(payload);
+    const result = await runAgentDispatchWorkerTask(payload, {
+      artifactDir: process.env.AGENTDISPATCH_ARTIFACT_DIR,
+      commandAllowlist: process.env.AGENTDISPATCH_COMMAND_ALLOWLIST?.split(",").map((value) => value.trim()).filter(Boolean)
+    });
     response.writeHead(result.ok ? 200 : 500, { "content-type": "application/json" });
     response.end(JSON.stringify(result));
   } catch (error) {
