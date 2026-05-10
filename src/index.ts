@@ -7,6 +7,7 @@ const execAsync = promisify(exec);
 
 export interface WorkerPayload {
   taskType: "agent.run" | "command.run" | string;
+  prompt?: string;
   input: {
     instruction?: string;
     command?: string;
@@ -48,7 +49,7 @@ export async function runAgentDispatchWorkerTask(payload: WorkerPayload, options
     return runCommand(payload, options);
   }
 
-  const instruction = payload.input.instruction ?? "";
+  const instruction = payload.input.instruction ?? payload.prompt ?? "";
   const resultPayload = {
     instruction,
     context: payload.input.context ?? {},

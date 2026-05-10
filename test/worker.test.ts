@@ -16,6 +16,14 @@ describe("worker contract", () => {
     await rm(artifactDir, { recursive: true, force: true });
   });
 
+  it("accepts AgentCore prompt aliases for starter-toolkit entrypoints", async () => {
+    const artifactDir = await mkdtemp(join(tmpdir(), "agentdispatch-worker-"));
+    const result = await runAgentDispatchWorkerTask({ taskType: "agent.run", prompt: "work from prompt", input: {} }, { artifactDir });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain("work from prompt");
+    await rm(artifactDir, { recursive: true, force: true });
+  });
+
   it("rejects commands outside the allowlist", async () => {
     const result = await runAgentDispatchWorkerTask(
       { taskType: "command.run", input: { command: "rm -rf /tmp/nope" } },
