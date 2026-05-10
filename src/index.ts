@@ -7,11 +7,13 @@ const execAsync = promisify(exec);
 
 export interface WorkerPayload {
   taskType: "agent.run" | "command.run" | string;
+  framework?: string;
   prompt?: string;
   input: {
     instruction?: string;
     command?: string;
     context?: Record<string, unknown>;
+    framework?: string;
     timeoutSeconds?: number;
     [key: string]: unknown;
   };
@@ -39,9 +41,30 @@ export interface WorkerResult {
   error?: string;
 }
 
+export interface AgentRunRequest {
+  instruction: string;
+  context: Record<string, unknown>;
+  input: WorkerPayload["input"];
+  metadata?: Record<string, unknown>;
+}
+
+export interface AgentRunResult {
+  output?: string;
+  result?: Record<string, unknown>;
+  events?: WorkerEvent[];
+  artifacts?: WorkerArtifact[];
+}
+
+export interface AgentFrameworkAdapter {
+  readonly name: string;
+  run(request: AgentRunRequest): Promise<AgentRunResult>;
+}
+
 export interface WorkerOptions {
   artifactDir?: string;
   commandAllowlist?: string[];
+  frameworkAdapters?: AgentFrameworkAdapter[];
+  defaultFramework?: string;
 }
 
 export async function runAgentDispatchWorkerTask(payload: WorkerPayload, options: WorkerOptions = {}): Promise<WorkerResult> {
@@ -49,20 +72,39 @@ export async function runAgentDispatchWorkerTask(payload: WorkerPayload, options
     return runCommand(payload, options);
   }
 
+  return runAgent(payload, options);
+}
+
+async function runAgent(payload: WorkerPayload, options: WorkerOptions): Promise<WorkerResult> {
+  const frameworkName = selectFrameworkName(payload, options);
+  const adapter = createFrameworkRegistry(options).get(frameworkName);
+  if (!adapter) {
+    return {
+      ok: false,
+      artifacts: [],
+      events: [{ type: "task.log", message: `Unsupported agent framework: ${frameworkName}`, payload: { framework: frameworkName } }],
+      error: `Unsupported agent framework: ${frameworkName}`
+    };
+  }
+
   const instruction = payload.input.instruction ?? payload.prompt ?? "";
-  const resultPayload = {
+  const context = payload.input.context ?? {};
+  const frameworkResult = await adapter.run({ instruction, context, input: payload.input, metadata: payload.metadata });
+  const resultPayload = frameworkResult.result ?? {
+    framework: adapter.name,
     instruction,
-    context: payload.input.context ?? {},
+    context,
     completedAt: new Date().toISOString()
   };
-  const artifacts = await writeArtifacts(options.artifactDir, resultPayload);
+  const artifacts = frameworkResult.artifacts ?? await writeArtifacts(options.artifactDir, resultPayload);
   return {
     ok: true,
-    output: `Accepted instruction: ${instruction}`,
+    output: frameworkResult.output,
     artifacts,
     events: [
-      { type: "task.progress", message: "AgentDispatch worker accepted agent.run task." },
+      { type: "task.progress", message: `AgentDispatch worker accepted agent.run task with ${adapter.name}.`, payload: { framework: adapter.name } },
       { type: "task.heartbeat", message: "AgentDispatch worker heartbeat.", payload: { status: "running" } },
+      ...(frameworkResult.events ?? []),
       { type: "task.result", payload: resultPayload }
     ]
   };
@@ -122,4 +164,29 @@ function commandAllowlistFromEnv(): string[] {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
+}
+
+function selectFrameworkName(payload: WorkerPayload, options: WorkerOptions): string {
+  return payload.input.framework ?? payload.framework ?? options.defaultFramework ?? process.env.AGENTDISPATCH_AGENT_FRAMEWORK ?? "echo";
+}
+
+function createFrameworkRegistry(options: WorkerOptions): Map<string, AgentFrameworkAdapter> {
+  const adapters = [new EchoAgentFrameworkAdapter(), ...(options.frameworkAdapters ?? [])];
+  return new Map(adapters.map((adapter) => [adapter.name, adapter]));
+}
+
+class EchoAgentFrameworkAdapter implements AgentFrameworkAdapter {
+  readonly name = "echo";
+
+  async run(request: AgentRunRequest): Promise<AgentRunResult> {
+    return {
+      output: `Accepted instruction: ${request.instruction}`,
+      result: {
+        framework: this.name,
+        instruction: request.instruction,
+        context: request.context,
+        completedAt: new Date().toISOString()
+      }
+    };
+  }
 }
