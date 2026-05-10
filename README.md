@@ -4,6 +4,8 @@ Reference AgentCore worker contract for AgentDispatch.
 
 The worker accepts normalized AgentDispatch payloads, executes long-running `agent.run` or `command.run` work, emits structured JSON events, and returns a JSON result. It is intended to be packaged into the ECR image used by `agentcore.runtime` mode.
 
+The HTTP server listens on port `8080`, returns `{"status":"Healthy"}` from `GET /ping`, and accepts invocation payloads at `POST /invocations`, matching AgentCore Runtime HTTP protocol expectations.
+
 ## Agent Frameworks
 
 Cloud adapters decide where a task runs. Worker framework adapters decide what agent framework runs inside that worker.

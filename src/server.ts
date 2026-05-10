@@ -1,12 +1,20 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { runAgentDispatchWorkerTask, type WorkerPayload } from "./index.js";
 
 const port = Number(process.env.PORT ?? 8080);
 
-const server = createServer(async (request, response) => {
+export const server = createServer(handleRequest);
+
+export async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   if (request.method === "GET" && request.url === "/ping") {
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ status: "ok" }));
+    response.end(JSON.stringify({ status: "Healthy" }));
+    return;
+  }
+
+  if (request.method === "POST" && request.url !== "/invocations") {
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: false, error: "Not found. Use POST /invocations." }));
     return;
   }
 
@@ -33,8 +41,10 @@ const server = createServer(async (request, response) => {
     response.writeHead(400, { "content-type": "application/json" });
     response.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }));
   }
-});
+}
 
-server.listen(port, () => {
-  console.error(`AgentDispatch worker listening on ${port}`);
-});
+if (process.env.AGENTDISPATCH_WORKER_NO_LISTEN !== "1") {
+  server.listen(port, () => {
+    console.error(`AgentDispatch worker listening on ${port}`);
+  });
+}
