@@ -14,7 +14,8 @@
     "dist",
     "README.md",
     "LICENSE",
-    "Dockerfile"
+    "Dockerfile",
+    "scripts/build-and-push-ecr.sh"
   ],
   "scripts": {
     "build": "tsup src/index.ts src/server.ts --format esm --dts --clean",
