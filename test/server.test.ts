@@ -43,6 +43,45 @@ describe("AgentCore worker HTTP server", () => {
     await expect(response.json()).resolves.toMatchObject({ ok: false, error: "Unsupported agent framework: missing-framework" });
   });
 
+  it("serves an A2A agent card", async () => {
+    const response = await fetch(`${baseUrl}/.well-known/agent-card.json`);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      name: "AgentDispatch Worker",
+      capabilities: { streaming: false },
+      skills: [expect.objectContaining({ id: "agentdispatch.agent.run" })]
+    });
+  });
+
+  it("accepts A2A message/send requests on root path", async () => {
+    const response = await fetch(`${baseUrl}/`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "req-1",
+        method: "message/send",
+        params: {
+          message: {
+            role: "user",
+            parts: [{ kind: "text", text: "work through A2A" }],
+            messageId: "msg-1"
+          }
+        }
+      })
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      jsonrpc: "2.0",
+      id: "req-1",
+      result: {
+        kind: "message",
+        role: "agent",
+        parts: [{ kind: "text", text: "Accepted instruction: work through A2A" }]
+      }
+    });
+  });
+
   it("rejects unsupported POST paths", async () => {
     const response = await fetch(`${baseUrl}/wrong`, {
       method: "POST",

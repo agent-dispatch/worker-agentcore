@@ -1,55 +1,82 @@
 # @agent-dispatch/worker-agentcore
 
-Reference AgentCore worker contract for AgentDispatch.
+[![npm](https://img.shields.io/npm/v/@agent-dispatch/worker-agentcore.svg)](https://www.npmjs.com/package/@agent-dispatch/worker-agentcore)
+[![license](https://img.shields.io/npm/l/@agent-dispatch/worker-agentcore.svg)](https://www.npmjs.com/package/@agent-dispatch/worker-agentcore)
 
-The worker accepts normalized AgentDispatch payloads, executes long-running `agent.run` or `command.run` work, emits structured JSON events, and returns a JSON result. It is intended to be packaged into the ECR image used by `agentcore.runtime` mode.
+Reference AWS AgentCore worker runtime for AgentDispatch.
 
-The HTTP server listens on port `8080`, returns `{"status":"Healthy"}` from `GET /ping`, and accepts invocation payloads at `POST /invocations`, matching AgentCore Runtime HTTP protocol expectations.
+This package is the cloud-side process you can package into an ECR image and run through AWS AgentCore. It receives tasks from `@agent-dispatch/adapter-aws-agentcore`, executes them with your chosen agent framework, and exposes protocol endpoints that let the lead agent continue interaction after spawn.
 
-## Agent Frameworks
+## What it provides
 
-Cloud adapters decide where a task runs. Worker framework adapters decide what agent framework runs inside that worker.
+- HTTP task endpoint for `agent.run` and `command.run` payloads.
+- A2A-compatible JSON-RPC `message/send` endpoint.
+- Agent Card discovery at `/.well-known/agent-card.json`.
+- Health endpoint for runtime checks.
+- Pluggable execution boundary for OpenClaw, Hermes Agent, LangChain, Strands, custom scripts, or direct model calls.
 
-`agent.run` selects a framework in this order:
+## Runtime contract
 
-1. `input.framework`
-2. top-level `framework`
-3. `AGENTDISPATCH_AGENT_FRAMEWORK`
-4. built-in `echo`
+Endpoint | Purpose
+--- | ---
+`GET /health` | Liveness check.
+`GET /.well-known/agent-card.json` | Returns A2A agent metadata and supported skills.
+`POST /` | Accepts AgentDispatch task payloads and A2A JSON-RPC messages.
 
-The built-in `echo` framework preserves the current reference behavior. Production workers can pass `frameworkAdapters` to `runAgentDispatchWorkerTask` to register adapters for Strands, LangChain, LangGraph, CrewAI, OpenAI Agents, or other deep-agent frameworks without changing MCP tools or cloud adapters.
+The default worker is intentionally small. It proves the AgentCore runtime path and gives teams a place to wire their real subagent implementation.
 
-## Contract
-
-The worker response includes:
-
-- `events`: structured `task.progress`, `task.heartbeat`, `task.log`, and `task.result` events.
-- `artifacts`: metadata for files written by the worker.
-- `output`: human-readable summary text.
-
-Environment:
-
-- `AGENTDISPATCH_ARTIFACT_DIR`: where `result.json` and `manifest.json` are written.
-- `AGENTDISPATCH_COMMAND_ALLOWLIST`: comma-separated command prefixes allowed for `command.run`.
-- `AGENTDISPATCH_AGENT_FRAMEWORK`: default `agent.run` framework name when the payload does not specify one.
-
-## Build And Push To ECR
-
-AgentCore Runtime runs on AWS Graviton, so build the reference worker image for `linux/arm64`.
+## Run locally
 
 ```bash
-AWS_REGION=us-west-2 \
-ECR_REPOSITORY=agentdispatch-worker-agentcore \
-IMAGE_TAG=latest \
-./scripts/build-and-push-ecr.sh
+npm install
+npm run build
+npm start
 ```
 
-The script:
+Send an A2A-style message:
 
-- creates the ECR repository if it does not exist
-- runs `npm ci` and `npm run build`
-- builds the Docker image for `linux/arm64`
-- pushes the image to ECR
-- prints the final image URI
+```bash
+curl -X POST http://localhost:9000/ \
+  -H "content-type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": "1",
+    "method": "message/send",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{ "kind": "text", "text": "Run the background task." }]
+      }
+    }
+  }'
+```
 
-Use the printed image URI as `target.details.ecrImageUri` for AgentDispatch runtime-mode dispatch.
+## Build a runtime image
+
+```bash
+docker build -t agentdispatch-worker-agentcore .
+docker tag agentdispatch-worker-agentcore:latest 123456789012.dkr.ecr.us-west-2.amazonaws.com/agentdispatch-worker:latest
+docker push 123456789012.dkr.ecr.us-west-2.amazonaws.com/agentdispatch-worker:latest
+```
+
+Use the pushed image in `@agent-dispatch/adapter-aws-agentcore` runtime mode with `ecrImageUri` and `executionRoleArn`.
+
+## Customizing the worker
+
+Replace the default executor with your framework-specific runtime:
+
+- OpenClaw or Hermes Agent for native subagent execution.
+- LangChain, Strands, or custom orchestrators for tool-heavy workflows.
+- Direct model calls for simple long-running analysis.
+- Internal tools exposed by the runtime container or cloud environment.
+
+The important boundary is the protocol contract: accept an AgentDispatch task or A2A message, run the subagent, emit structured results, and keep cloud credentials inside the runtime environment.
+
+## Development
+
+```bash
+npm install
+npm run typecheck
+npm test
+npm run build
+```
