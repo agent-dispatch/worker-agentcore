@@ -33,6 +33,16 @@ describe("AgentCore worker HTTP server", () => {
     await expect(response.json()).resolves.toMatchObject({ ok: true, output: "Accepted instruction: work" });
   });
 
+  it("returns structured application failures with HTTP 200", async () => {
+    const response = await fetch(`${baseUrl}/invocations`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ taskType: "agent.run", input: { instruction: "work", framework: "missing-framework" } })
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ ok: false, error: "Unsupported agent framework: missing-framework" });
+  });
+
   it("rejects unsupported POST paths", async () => {
     const response = await fetch(`${baseUrl}/wrong`, {
       method: "POST",

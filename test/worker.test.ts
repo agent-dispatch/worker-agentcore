@@ -61,6 +61,24 @@ describe("worker contract", () => {
     expect(result.error).toContain("ALLOWLIST");
   });
 
+  it("does not execute shell metacharacters through allowed commands", async () => {
+    const result = await runAgentDispatchWorkerTask(
+      { taskType: "command.run", input: { command: "echo ok; uname -a", timeoutSeconds: 2 } },
+      { commandAllowlist: ["echo"] }
+    );
+    expect(result.ok).toBe(true);
+    expect(result.output).toBe("ok; uname -a\n");
+  });
+
+  it("supports quoted command arguments without shell execution", async () => {
+    const result = await runAgentDispatchWorkerTask(
+      { taskType: "command.run", input: { command: "echo \"hello world\"", timeoutSeconds: 2 } },
+      { commandAllowlist: ["echo"] }
+    );
+    expect(result.ok).toBe(true);
+    expect(result.output).toBe("hello world\n");
+  });
+
   it("runs allowed commands and writes artifacts", async () => {
     const artifactDir = await mkdtemp(join(tmpdir(), "agentdispatch-worker-"));
     const result = await runAgentDispatchWorkerTask(

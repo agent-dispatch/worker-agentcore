@@ -1,9 +1,6 @@
-import { exec } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { promisify } from "node:util";
-
-const execAsync = promisify(exec);
 
 export interface WorkerPayload {
   taskType: "agent.run" | "command.run" | string;
@@ -115,29 +112,10 @@ async function runCommand(payload: WorkerPayload, options: WorkerOptions): Promi
   if (!command) {
     return { ok: false, events: [], artifacts: [], error: "command.run requires input.command." };
   }
-  const allowlist = options.commandAllowlist ?? commandAllowlistFromEnv();
-  if (allowlist.length > 0 && !allowlist.some((allowed) => command === allowed || command.startsWith(`${allowed} `))) {
-    return {
-      ok: false,
-      artifacts: [],
-      events: [{ type: "task.log", message: `Command is not allowed: ${command}`, payload: { stream: "stderr" } }],
-      error: "Command rejected by AGENTDISPATCH_COMMAND_ALLOWLIST."
-    };
-  }
+
+  let parsedCommand: ParsedCommand;
   try {
-    const result = await execAsync(command, { timeout: Number(payload.input.timeoutSeconds ?? 900) * 1000 });
-    const artifacts = await writeArtifacts(options.artifactDir, { command, stdout: result.stdout, stderr: result.stderr, exitCode: 0 });
-    return {
-      ok: true,
-      output: result.stdout,
-      artifacts,
-      events: [
-        { type: "task.heartbeat", message: "AgentDispatch worker heartbeat.", payload: { status: "running" } },
-        { type: "task.log", message: result.stdout, payload: { stream: "stdout" } },
-        { type: "task.log", message: result.stderr, payload: { stream: "stderr" } },
-        { type: "task.result", payload: { exitCode: 0 } }
-      ]
-    };
+    parsedCommand = parseCommand(command);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {
@@ -147,6 +125,130 @@ async function runCommand(payload: WorkerPayload, options: WorkerOptions): Promi
       error: message
     };
   }
+
+  const allowlist = options.commandAllowlist ?? commandAllowlistFromEnv();
+  if (allowlist.length > 0 && !allowlist.includes(parsedCommand.executable)) {
+    return {
+      ok: false,
+      artifacts: [],
+      events: [{ type: "task.log", message: `Command is not allowed: ${parsedCommand.executable}`, payload: { stream: "stderr" } }],
+      error: "Command rejected by AGENTDISPATCH_COMMAND_ALLOWLIST."
+    };
+  }
+
+  const result = await spawnCommand(parsedCommand, Number(payload.input.timeoutSeconds ?? 900) * 1000);
+  if (result.exitCode !== 0) {
+    const message = result.error ?? `Command exited with code ${result.exitCode}.`;
+    return {
+      ok: false,
+      artifacts: [],
+      events: [{ type: "task.log", message: result.stderr || message, payload: { stream: "stderr", exitCode: result.exitCode } }],
+      error: message
+    };
+  }
+
+  const artifacts = await writeArtifacts(options.artifactDir, { command, stdout: result.stdout, stderr: result.stderr, exitCode: 0 });
+  return {
+    ok: true,
+    output: result.stdout,
+    artifacts,
+    events: [
+      { type: "task.heartbeat", message: "AgentDispatch worker heartbeat.", payload: { status: "running" } },
+      { type: "task.log", message: result.stdout, payload: { stream: "stdout" } },
+      { type: "task.log", message: result.stderr, payload: { stream: "stderr" } },
+      { type: "task.result", payload: { exitCode: 0 } }
+    ]
+  };
+}
+
+interface ParsedCommand {
+  executable: string;
+  args: string[];
+}
+
+interface SpawnCommandResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  error?: string;
+}
+
+function parseCommand(command: string): ParsedCommand {
+  const args: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | undefined;
+  let escaped = false;
+
+  for (const char of command.trim()) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        quote = undefined;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        args.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+
+  if (escaped) current += "\\";
+  if (quote) throw new Error("command.run input.command contains an unterminated quote.");
+  if (current) args.push(current);
+  const [executable, ...rest] = args;
+  if (!executable) throw new Error("command.run requires input.command.");
+  return { executable, args: rest };
+}
+
+function spawnCommand(command: ParsedCommand, timeoutMs: number): Promise<SpawnCommandResult> {
+  return new Promise((resolve) => {
+    const child = spawn(command.executable, command.args, { shell: false });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      child.kill("SIGTERM");
+      settled = true;
+      resolve({ stdout, stderr, exitCode: null, error: `Command timed out after ${timeoutMs}ms.` });
+    }, timeoutMs);
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", (error) => {
+      if (settled) return;
+      clearTimeout(timeout);
+      settled = true;
+      resolve({ stdout, stderr, exitCode: null, error: error.message });
+    });
+    child.on("close", (code) => {
+      if (settled) return;
+      clearTimeout(timeout);
+      settled = true;
+      resolve({ stdout, stderr, exitCode: code });
+    });
+  });
 }
 
 async function writeArtifacts(artifactDir = process.env.AGENTDISPATCH_ARTIFACT_DIR ?? "/tmp/agentdispatch-artifacts", payload: Record<string, unknown>): Promise<WorkerArtifact[]> {

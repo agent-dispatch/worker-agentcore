@@ -35,7 +35,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
       artifactDir: process.env.AGENTDISPATCH_ARTIFACT_DIR,
       commandAllowlist: process.env.AGENTDISPATCH_COMMAND_ALLOWLIST?.split(",").map((value) => value.trim()).filter(Boolean)
     });
-    response.writeHead(result.ok ? 200 : 500, { "content-type": "application/json" });
+    response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify(result));
   } catch (error) {
     response.writeHead(400, { "content-type": "application/json" });
