@@ -1,10 +1,10 @@
 # Release Workflow
 
-`@agentdispatch/worker-agentcore` is published after `@agentdispatch/core`.
+`@agent-dispatch/worker-agentcore` is published after `@agent-dispatch/core`.
 
 ## Prerequisites
 
-- Publish `@agentdispatch/core` for the target compatibility line.
+- Publish `@agent-dispatch/core` for the target compatibility line.
 - Add an npm automation token as `NPM_TOKEN` in repository secrets.
 - Replace bootstrap `file:../agentdispatch-core` links with the published core version before the first registry release.
 

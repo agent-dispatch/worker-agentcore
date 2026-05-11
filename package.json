@@ -1,5 +1,5 @@
 {
-  "name": "@agentdispatch/worker-agentcore",
+  "name": "@agent-dispatch/worker-agentcore",
   "version": "0.1.0",
   "description": "Standard AgentCore worker contract for AgentDispatch long-running tasks.",
   "type": "module",
@@ -10,7 +10,12 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md", "LICENSE", "Dockerfile"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "Dockerfile"
+  ],
   "scripts": {
     "build": "tsup src/index.ts src/server.ts --format esm --dts --clean",
     "image:push:ecr": "bash scripts/build-and-push-ecr.sh",
@@ -18,12 +23,23 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@agentdispatch/core": "file:../agentdispatch-core"
+    "@agent-dispatch/core": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "tsup": "^8.3.5",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agent-dispatch/worker-agentcore.git"
+  },
+  "bugs": {
+    "url": "https://github.com/agent-dispatch/worker-agentcore/issues"
+  },
+  "homepage": "https://github.com/agent-dispatch/worker-agentcore#readme",
+  "publishConfig": {
+    "access": "public"
   }
 }

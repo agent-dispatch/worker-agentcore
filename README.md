@@ -1,4 +1,4 @@
-# @agentdispatch/worker-agentcore
+# @agent-dispatch/worker-agentcore
 
 Reference AgentCore worker contract for AgentDispatch.
 
