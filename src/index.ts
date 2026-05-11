@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -252,12 +253,13 @@ function spawnCommand(command: ParsedCommand, timeoutMs: number): Promise<SpawnC
 }
 
 async function writeArtifacts(artifactDir = process.env.AGENTDISPATCH_ARTIFACT_DIR ?? "/tmp/agentdispatch-artifacts", payload: Record<string, unknown>): Promise<WorkerArtifact[]> {
-  await mkdir(artifactDir, { recursive: true });
-  const resultPath = join(artifactDir, "result.json");
+  const invocationDir = join(artifactDir, randomUUID());
+  await mkdir(invocationDir, { recursive: true });
+  const resultPath = join(invocationDir, "result.json");
   const resultBytes = Buffer.from(JSON.stringify(payload, null, 2));
   await writeFile(resultPath, resultBytes);
   const artifacts = [{ uri: resultPath, kind: "json", contentType: "application/json", sizeBytes: resultBytes.byteLength }];
-  await writeFile(join(artifactDir, "manifest.json"), JSON.stringify({ artifacts }, null, 2));
+  await writeFile(join(invocationDir, "manifest.json"), JSON.stringify({ artifacts }, null, 2));
   return artifacts;
 }
 

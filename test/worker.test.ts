@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { runAgentDispatchWorkerTask, type AgentFrameworkAdapter } from "../src/index.js";
 
@@ -13,7 +13,20 @@ describe("worker contract", () => {
     expect(result.events[0].type).toBe("task.progress");
     expect(result.events.some((event) => event.type === "task.heartbeat")).toBe(true);
     expect(result.artifacts[0]).toMatchObject({ kind: "json", contentType: "application/json" });
-    await expect(readFile(join(artifactDir, "manifest.json"), "utf8")).resolves.toContain("result.json");
+    await expect(readFile(join(dirname(result.artifacts[0].uri), "manifest.json"), "utf8")).resolves.toContain("result.json");
+    await rm(artifactDir, { recursive: true, force: true });
+  });
+
+  it("writes per-invocation artifact paths without collisions", async () => {
+    const artifactDir = await mkdtemp(join(tmpdir(), "agentdispatch-worker-"));
+    const first = await runAgentDispatchWorkerTask({ taskType: "agent.run", input: { instruction: "first" } }, { artifactDir });
+    const second = await runAgentDispatchWorkerTask({ taskType: "agent.run", input: { instruction: "second" } }, { artifactDir });
+
+    expect(first.artifacts[0].uri).not.toBe(second.artifacts[0].uri);
+    await expect(readFile(first.artifacts[0].uri, "utf8")).resolves.toContain("first");
+    await expect(readFile(second.artifacts[0].uri, "utf8")).resolves.toContain("second");
+    await expect(readFile(join(dirname(first.artifacts[0].uri), "manifest.json"), "utf8")).resolves.toContain(first.artifacts[0].uri);
+    await expect(readFile(join(dirname(second.artifacts[0].uri), "manifest.json"), "utf8")).resolves.toContain(second.artifacts[0].uri);
     await rm(artifactDir, { recursive: true, force: true });
   });
 
