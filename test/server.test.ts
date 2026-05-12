@@ -24,6 +24,11 @@ describe("AgentCore worker HTTP server", () => {
     await expect(response.json()).resolves.toEqual({ status: "Healthy" });
   });
 
+  it("returns local health alias", async () => {
+    const response = await fetch(`${baseUrl}/health`);
+    await expect(response.json()).resolves.toEqual({ status: "Healthy" });
+  });
+
   it("accepts invocation requests on /invocations", async () => {
     const response = await fetch(`${baseUrl}/invocations`, {
       method: "POST",

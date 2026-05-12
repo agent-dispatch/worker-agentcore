@@ -20,6 +20,7 @@
   "scripts": {
     "build": "tsup src/index.ts src/server.ts --format esm --dts --clean",
     "image:push:ecr": "bash scripts/build-and-push-ecr.sh",
+    "start": "node dist/server.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

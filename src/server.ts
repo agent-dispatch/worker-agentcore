@@ -8,7 +8,7 @@ const port = Number(process.env.PORT ?? (protocol === "a2a" ? 9000 : 8080));
 export const server = createServer(handleRequest);
 
 export async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
-  if (request.method === "GET" && request.url === "/ping") {
+  if (request.method === "GET" && (request.url === "/ping" || request.url === "/health")) {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({ status: "Healthy" }));
     return;

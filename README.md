@@ -19,9 +19,13 @@ This package is the cloud-side process you can package into an ECR image and run
 
 Endpoint | Purpose
 --- | ---
-`GET /health` | Liveness check.
+`GET /ping` | AgentCore health check. Returns `{"status":"Healthy"}`.
+`GET /health` | Local liveness alias.
 `GET /.well-known/agent-card.json` | Returns A2A agent metadata and supported skills.
-`POST /` | Accepts AgentDispatch task payloads and A2A JSON-RPC messages.
+`POST /` | Accepts A2A JSON-RPC `message/send` messages.
+`POST /invocations` | Accepts the AgentDispatch HTTP task envelope.
+
+The default image is optimized for AgentCore A2A runtimes. It listens on port `9000` unless you override `PORT`, matching the AgentCore A2A service contract. For HTTP envelope mode, run with `AGENTDISPATCH_WORKER_PROTOCOL=http PORT=8080`.
 
 The default worker is intentionally small. It proves the AgentCore runtime path and gives teams a place to wire their real subagent implementation.
 
@@ -30,7 +34,7 @@ The default worker is intentionally small. It proves the AgentCore runtime path 
 ```bash
 npm install
 npm run build
-npm start
+AGENTDISPATCH_WORKER_PROTOCOL=a2a npm start
 ```
 
 Send an A2A-style message:
@@ -60,6 +64,8 @@ docker push 123456789012.dkr.ecr.us-west-2.amazonaws.com/agentdispatch-worker:la
 ```
 
 Use the pushed image in `@agent-dispatch/adapter-aws-agentcore` runtime mode with `ecrImageUri` and `executionRoleArn`.
+
+The AWS adapter automatically sets `AGENTDISPATCH_WORKER_PROTOCOL` on runtime-mode deployments to match the requested AgentCore protocol. You can override or add environment variables with `target.details.environmentVariables`.
 
 ## Customizing the worker
 
