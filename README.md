@@ -69,7 +69,66 @@ The AWS adapter automatically sets `AGENTDISPATCH_WORKER_PROTOCOL` on runtime-mo
 
 ## Customizing the worker
 
-Replace the default executor with your framework-specific runtime:
+The default executor is `echo`, which is only a smoke-test implementation. For a real cloud subagent, configure a command-backed framework adapter in the runtime environment:
+
+```bash
+AGENTDISPATCH_AGENT_FRAMEWORK=openclaw
+AGENTDISPATCH_FRAMEWORK_COMMAND_OPENCLAW="openclaw run --stdin-json"
+```
+
+Or configure multiple frameworks at once:
+
+```bash
+AGENTDISPATCH_FRAMEWORK_COMMANDS='{
+  "openclaw": "openclaw run --stdin-json",
+  "hermes": {
+    "command": "hermes-agent run --stdin-json",
+    "timeoutSeconds": 1800,
+    "env": {
+      "HERMES_MODE": "subagent"
+    }
+  }
+}'
+```
+
+When `input.framework` is `openclaw`, the worker launches the configured command without a shell, sends this JSON envelope to `stdin`, and maps the command response back into AgentDispatch events and results:
+
+```json
+{
+  "taskType": "agent.run",
+  "framework": "openclaw",
+  "instruction": "Run the background task",
+  "context": {},
+  "input": {},
+  "metadata": {}
+}
+```
+
+Framework commands can return either plain text or structured JSON:
+
+```json
+{
+  "output": "Task completed.",
+  "result": {
+    "summary": "Task completed."
+  },
+  "events": [
+    {
+      "type": "task.progress",
+      "message": "Repository scan complete."
+    }
+  ],
+  "artifacts": [
+    {
+      "uri": "s3://bucket/task/result.json",
+      "kind": "json",
+      "contentType": "application/json"
+    }
+  ]
+}
+```
+
+This makes the package usable with:
 
 - OpenClaw or Hermes Agent for native subagent execution.
 - LangChain, Strands, or custom orchestrators for tool-heavy workflows.

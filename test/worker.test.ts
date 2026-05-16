@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { runAgentDispatchWorkerTask, type AgentFrameworkAdapter } from "../src/index.js";
@@ -49,6 +49,73 @@ describe("worker contract", () => {
     expect(result.output).toBe("strands:deep research");
     expect(result.events.some((event) => event.message === "strands started")).toBe(true);
     expect(result.events.at(-1)?.payload).toMatchObject({ framework: "strands", answer: "deep research" });
+  });
+
+  it("runs command-backed framework adapters from environment", async () => {
+    const artifactDir = await mkdtemp(join(tmpdir(), "agentdispatch-worker-"));
+    const scriptPath = join(artifactDir, "openclaw.mjs");
+    const previousCommand = process.env.AGENTDISPATCH_FRAMEWORK_COMMAND_OPENCLAW;
+    await writeFile(scriptPath, `
+let body = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) body += chunk;
+const request = JSON.parse(body);
+console.error("openclaw stderr");
+console.log(JSON.stringify({
+  output: "openclaw:" + request.instruction,
+  result: { framework: request.framework, repo: request.context.repo },
+  events: [{ type: "task.progress", message: "openclaw started" }]
+}));
+`);
+    process.env.AGENTDISPATCH_FRAMEWORK_COMMAND_OPENCLAW = `${process.execPath} ${scriptPath}`;
+
+    try {
+      const result = await runAgentDispatchWorkerTask({
+        taskType: "agent.run",
+        input: { instruction: "deep research", framework: "openclaw", context: { repo: "agent-dispatch" } }
+      }, { artifactDir });
+
+      expect(result.ok).toBe(true);
+      expect(result.output).toBe("openclaw:deep research");
+      expect(result.events.some((event) => event.message === "openclaw started")).toBe(true);
+      expect(result.events.some((event) => event.message === "openclaw stderr")).toBe(true);
+      expect(result.events.at(-1)?.payload).toMatchObject({ framework: "openclaw", repo: "agent-dispatch" });
+    } finally {
+      if (previousCommand === undefined) delete process.env.AGENTDISPATCH_FRAMEWORK_COMMAND_OPENCLAW;
+      else process.env.AGENTDISPATCH_FRAMEWORK_COMMAND_OPENCLAW = previousCommand;
+      await rm(artifactDir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs JSON-configured command-backed framework adapters", async () => {
+    const artifactDir = await mkdtemp(join(tmpdir(), "agentdispatch-worker-"));
+    const scriptPath = join(artifactDir, "hermes.mjs");
+    const previousCommands = process.env.AGENTDISPATCH_FRAMEWORK_COMMANDS;
+    await writeFile(scriptPath, `
+let body = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) body += chunk;
+const request = JSON.parse(body);
+console.log(JSON.stringify({ output: process.env.HERMES_MODE + ":" + request.instruction }));
+`);
+    process.env.AGENTDISPATCH_FRAMEWORK_COMMANDS = JSON.stringify({
+      hermes: { command: `${process.execPath} ${scriptPath}`, env: { HERMES_MODE: "subagent" }, timeoutSeconds: 2 }
+    });
+
+    try {
+      const result = await runAgentDispatchWorkerTask({
+        taskType: "agent.run",
+        input: { instruction: "plan migration", framework: "hermes" }
+      }, { artifactDir });
+
+      expect(result.ok).toBe(true);
+      expect(result.output).toBe("subagent:plan migration");
+      expect(result.events.at(-1)?.payload).toMatchObject({ framework: "hermes" });
+    } finally {
+      if (previousCommands === undefined) delete process.env.AGENTDISPATCH_FRAMEWORK_COMMANDS;
+      else process.env.AGENTDISPATCH_FRAMEWORK_COMMANDS = previousCommands;
+      await rm(artifactDir, { recursive: true, force: true });
+    }
   });
 
   it("reports unsupported framework selections clearly", async () => {

@@ -1,5 +1,8 @@
 import { createServer } from "node:http";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 let baseUrl: string;
 let testServer: ReturnType<typeof createServer>;
@@ -85,6 +88,54 @@ describe("AgentCore worker HTTP server", () => {
         parts: [{ kind: "text", text: "Accepted instruction: work through A2A" }]
       }
     });
+  });
+
+  it("passes A2A framework metadata to command-backed adapters", async () => {
+    const artifactDir = await mkdtemp(join(tmpdir(), "agentdispatch-worker-server-"));
+    const scriptPath = join(artifactDir, "openclaw-a2a.mjs");
+    const previousCommand = process.env.AGENTDISPATCH_FRAMEWORK_COMMAND_OPENCLAW;
+    await writeFile(scriptPath, `
+let body = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) body += chunk;
+const request = JSON.parse(body);
+console.log(JSON.stringify({ output: request.framework + ":" + request.instruction + ":" + request.context.repo }));
+`);
+    process.env.AGENTDISPATCH_FRAMEWORK_COMMAND_OPENCLAW = `${process.execPath} ${scriptPath}`;
+
+    try {
+      const response = await fetch(`${baseUrl}/`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: "req-2",
+          method: "message/send",
+          params: {
+            message: {
+              role: "user",
+              parts: [{ kind: "text", text: "work through OpenClaw" }],
+              messageId: "msg-2"
+            },
+            metadata: {
+              framework: "openclaw",
+              context: { repo: "agent-dispatch" }
+            }
+          }
+        })
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        result: {
+          parts: [{ kind: "text", text: "openclaw:work through OpenClaw:agent-dispatch" }]
+        }
+      });
+    } finally {
+      if (previousCommand === undefined) delete process.env.AGENTDISPATCH_FRAMEWORK_COMMAND_OPENCLAW;
+      else process.env.AGENTDISPATCH_FRAMEWORK_COMMAND_OPENCLAW = previousCommand;
+      await rm(artifactDir, { recursive: true, force: true });
+    }
   });
 
   it("rejects unsupported POST paths", async () => {

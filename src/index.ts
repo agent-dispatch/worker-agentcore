@@ -58,6 +58,12 @@ export interface AgentFrameworkAdapter {
   run(request: AgentRunRequest): Promise<AgentRunResult>;
 }
 
+export interface CommandFrameworkConfig {
+  command: string;
+  timeoutSeconds?: number;
+  env?: Record<string, string>;
+}
+
 export interface WorkerOptions {
   artifactDir?: string;
   commandAllowlist?: string[];
@@ -87,7 +93,22 @@ async function runAgent(payload: WorkerPayload, options: WorkerOptions): Promise
 
   const instruction = payload.input.instruction ?? payload.prompt ?? "";
   const context = payload.input.context ?? {};
-  const frameworkResult = await adapter.run({ instruction, context, input: payload.input, metadata: payload.metadata });
+  let frameworkResult: AgentRunResult;
+  try {
+    frameworkResult = await adapter.run({ instruction, context, input: payload.input, metadata: payload.metadata });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      output: undefined,
+      artifacts: [],
+      events: [
+        { type: "task.progress", message: `AgentDispatch worker accepted agent.run task with ${adapter.name}.`, payload: { framework: adapter.name } },
+        { type: "task.log", message, payload: { framework: adapter.name, stream: "stderr" } }
+      ],
+      error: message
+    };
+  }
   const resultPayload = frameworkResult.result ?? {
     framework: adapter.name,
     instruction,
@@ -221,8 +242,12 @@ function parseCommand(command: string): ParsedCommand {
 }
 
 function spawnCommand(command: ParsedCommand, timeoutMs: number): Promise<SpawnCommandResult> {
+  return spawnCommandWithInput(command, timeoutMs);
+}
+
+function spawnCommandWithInput(command: ParsedCommand, timeoutMs: number, stdin?: string, env?: Record<string, string>): Promise<SpawnCommandResult> {
   return new Promise((resolve) => {
-    const child = spawn(command.executable, command.args, { shell: false });
+    const child = spawn(command.executable, command.args, { shell: false, env: env ? { ...process.env, ...env } : process.env });
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -237,6 +262,9 @@ function spawnCommand(command: ParsedCommand, timeoutMs: number): Promise<SpawnC
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
+    if (stdin !== undefined) {
+      child.stdin.end(stdin);
+    }
     child.on("error", (error) => {
       if (settled) return;
       clearTimeout(timeout);
@@ -275,8 +303,155 @@ function selectFrameworkName(payload: WorkerPayload, options: WorkerOptions): st
 }
 
 function createFrameworkRegistry(options: WorkerOptions): Map<string, AgentFrameworkAdapter> {
-  const adapters = [new EchoAgentFrameworkAdapter(), ...(options.frameworkAdapters ?? [])];
+  const adapters = [
+    new EchoAgentFrameworkAdapter(),
+    ...commandFrameworkAdaptersFromEnv(),
+    ...(options.frameworkAdapters ?? [])
+  ];
   return new Map(adapters.map((adapter) => [adapter.name, adapter]));
+}
+
+function commandFrameworkAdaptersFromEnv(env = process.env): AgentFrameworkAdapter[] {
+  const configs = new Map<string, CommandFrameworkConfig>();
+
+  if (env.AGENTDISPATCH_FRAMEWORK_COMMAND) {
+    configs.set(env.AGENTDISPATCH_AGENT_FRAMEWORK ?? "command", {
+      command: env.AGENTDISPATCH_FRAMEWORK_COMMAND,
+      timeoutSeconds: readOptionalPositiveNumber(env.AGENTDISPATCH_FRAMEWORK_TIMEOUT_SECONDS)
+    });
+  }
+
+  if (env.AGENTDISPATCH_FRAMEWORK_COMMANDS) {
+    const parsed = JSON.parse(env.AGENTDISPATCH_FRAMEWORK_COMMANDS) as Record<string, string | CommandFrameworkConfig>;
+    for (const [name, value] of Object.entries(parsed)) {
+      configs.set(name, normalizeCommandFrameworkConfig(name, value));
+    }
+  }
+
+  for (const [key, value] of Object.entries(env)) {
+    if (!key.startsWith("AGENTDISPATCH_FRAMEWORK_COMMAND_") || !value) continue;
+    if (key === "AGENTDISPATCH_FRAMEWORK_COMMANDS") continue;
+    const name = key
+      .slice("AGENTDISPATCH_FRAMEWORK_COMMAND_".length)
+      .toLowerCase()
+      .replaceAll("_", "-");
+    configs.set(name, { command: value });
+  }
+
+  return Array.from(configs.entries()).map(([name, config]) => new CommandAgentFrameworkAdapter(name, config));
+}
+
+function normalizeCommandFrameworkConfig(name: string, value: string | CommandFrameworkConfig): CommandFrameworkConfig {
+  if (typeof value === "string") return { command: value };
+  if (!value || typeof value !== "object" || typeof value.command !== "string") {
+    throw new Error(`AGENTDISPATCH_FRAMEWORK_COMMANDS.${name} must be a command string or object with command.`);
+  }
+  if (value.env) {
+    for (const [key, envValue] of Object.entries(value.env)) {
+      if (typeof envValue !== "string") {
+        throw new Error(`AGENTDISPATCH_FRAMEWORK_COMMANDS.${name}.env.${key} must be a string.`);
+      }
+    }
+  }
+  return {
+    command: value.command,
+    timeoutSeconds: value.timeoutSeconds,
+    env: value.env
+  };
+}
+
+function readOptionalPositiveNumber(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error("AGENTDISPATCH_FRAMEWORK_TIMEOUT_SECONDS must be a positive number.");
+  }
+  return parsed;
+}
+
+class CommandAgentFrameworkAdapter implements AgentFrameworkAdapter {
+  constructor(readonly name: string, private readonly config: CommandFrameworkConfig) {}
+
+  async run(request: AgentRunRequest): Promise<AgentRunResult> {
+    const command = parseCommand(this.config.command);
+    const payload = JSON.stringify({
+      taskType: "agent.run",
+      framework: this.name,
+      instruction: request.instruction,
+      context: request.context,
+      input: request.input,
+      metadata: request.metadata
+    });
+    const timeoutMs = Number(this.config.timeoutSeconds ?? request.input.timeoutSeconds ?? 900) * 1000;
+    const result = await spawnCommandWithInput(command, timeoutMs, payload, this.config.env);
+    if (result.exitCode !== 0) {
+      throw new Error(result.stderr.trim() || result.error || `Framework command exited with code ${result.exitCode}.`);
+    }
+
+    return parseCommandFrameworkOutput(this.name, result.stdout, result.stderr);
+  }
+}
+
+function parseCommandFrameworkOutput(framework: string, stdout: string, stderr: string): AgentRunResult {
+  const events: WorkerEvent[] = stderr.trim()
+    ? [{ type: "task.log", message: stderr.trim(), payload: { framework, stream: "stderr" } }]
+    : [];
+  const trimmed = stdout.trim();
+  if (!trimmed) {
+    return {
+      output: "",
+      result: { framework, completedAt: new Date().toISOString() },
+      events
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as Partial<AgentRunResult> & { output?: unknown; result?: unknown };
+    return {
+      output: typeof parsed.output === "string" ? parsed.output : trimmed,
+      result: isRecord(parsed.result) ? parsed.result : { framework, response: parsed, completedAt: new Date().toISOString() },
+      events: [...events, ...normalizeWorkerEvents(parsed.events)],
+      artifacts: normalizeWorkerArtifacts(parsed.artifacts)
+    };
+  } catch {
+    return {
+      output: stdout,
+      result: { framework, output: stdout, completedAt: new Date().toISOString() },
+      events
+    };
+  }
+}
+
+function normalizeWorkerEvents(events: unknown): WorkerEvent[] {
+  if (!Array.isArray(events)) return [];
+  return events
+    .filter(isRecord)
+    .map((event) => ({
+      type: isWorkerEventType(event.type) ? event.type : "task.log",
+      message: typeof event.message === "string" ? event.message : undefined,
+      payload: isRecord(event.payload) ? event.payload : undefined
+    }));
+}
+
+function normalizeWorkerArtifacts(artifacts: unknown): WorkerArtifact[] | undefined {
+  if (!Array.isArray(artifacts)) return undefined;
+  return artifacts
+    .filter(isRecord)
+    .filter((artifact) => typeof artifact.uri === "string" && typeof artifact.kind === "string")
+    .map((artifact) => ({
+      uri: artifact.uri as string,
+      kind: artifact.kind as string,
+      contentType: typeof artifact.contentType === "string" ? artifact.contentType : undefined,
+      sizeBytes: typeof artifact.sizeBytes === "number" ? artifact.sizeBytes : undefined
+    }));
+}
+
+function isWorkerEventType(value: unknown): value is WorkerEvent["type"] {
+  return value === "task.progress" || value === "task.log" || value === "task.result" || value === "task.heartbeat";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 class EchoAgentFrameworkAdapter implements AgentFrameworkAdapter {

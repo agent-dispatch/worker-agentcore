@@ -80,7 +80,11 @@ async function handleA2ARequest(body: any, response: ServerResponse): Promise<vo
   const metadata = body.params?.metadata && typeof body.params.metadata === "object" ? body.params.metadata : {};
   const input = metadata.input && typeof metadata.input === "object"
     ? { ...metadata.input, instruction }
-    : { instruction, context: metadata.context ?? {} };
+    : {
+        instruction,
+        context: metadata.context ?? {},
+        framework: typeof metadata.framework === "string" ? metadata.framework : undefined
+      };
   const result = await runAgentDispatchWorkerTask({
     taskType: "agent.run",
     input,
