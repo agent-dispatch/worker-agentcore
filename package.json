@@ -2,6 +2,16 @@
   "name": "@agent-dispatch/worker-agentcore",
   "version": "0.1.1",
   "description": "Standard AgentCore worker contract for AgentDispatch long-running tasks.",
+  "keywords": [
+    "agentdispatch",
+    "aws",
+    "bedrock-agentcore",
+    "agentcore",
+    "worker",
+    "a2a",
+    "cloud-agents",
+    "subagents"
+  ],
   "type": "module",
   "license": "Apache-2.0",
   "exports": {
