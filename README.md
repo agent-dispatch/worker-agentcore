@@ -1,6 +1,7 @@
 # @agent-dispatch/worker-agentcore
 
 [![npm](https://img.shields.io/npm/v/@agent-dispatch/worker-agentcore.svg)](https://www.npmjs.com/package/@agent-dispatch/worker-agentcore)
+[![CI](https://github.com/agent-dispatch/worker-agentcore/actions/workflows/ci.yml/badge.svg)](https://github.com/agent-dispatch/worker-agentcore/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/@agent-dispatch/worker-agentcore.svg)](https://www.npmjs.com/package/@agent-dispatch/worker-agentcore)
 
 Reference AWS AgentCore worker runtime for AgentDispatch.
